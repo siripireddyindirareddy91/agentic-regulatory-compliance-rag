@@ -149,3 +149,37 @@ class OriginalFile(Record, Base):
     filename: Mapped[str] = mapped_column(String(240))
     content: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(String(64))
+class Job(Record, Base):
+    __tablename__ = 'background_jobs'
+    kind: Mapped[str] = mapped_column(String(30))
+    payload: Mapped[dict] = mapped_column(JSON,default=dict)
+    status: Mapped[str] = mapped_column(String(30),default='Queued',index=True)
+    attempts: Mapped[int] = mapped_column(default=0)
+    available_at: Mapped[str] = mapped_column(String(40),default=now,index=True)
+    lease_until: Mapped[str] = mapped_column(String(40),default='')
+    lease_owner: Mapped[str] = mapped_column(String(36),default='')
+    result: Mapped[dict] = mapped_column(JSON,default=dict)
+    error: Mapped[str] = mapped_column(Text,default='')
+    actor_id: Mapped[str] = mapped_column(ForeignKey('users.id'))
+    dedupe_key: Mapped[str] = mapped_column(String(180))
+    __table_args__=(UniqueConstraint('institution_id','dedupe_key'),)
+class MonitorState(Record, Base):
+    __tablename__ = 'source_monitor_state'
+    source_id: Mapped[str] = mapped_column(ForeignKey('regulatory_sources.id'),unique=True)
+    interval_hours: Mapped[int] = mapped_column(default=24)
+    next_check: Mapped[str] = mapped_column(String(40),default=now)
+    last_checked: Mapped[str] = mapped_column(String(40),default='')
+    last_hash: Mapped[str] = mapped_column(String(64),default='')
+    status: Mapped[str] = mapped_column(String(100),default='Not checked')
+    detail: Mapped[dict] = mapped_column(JSON,default=dict)
+class GeneratedReport(Record, Base):
+    __tablename__ = 'scheduled_reports'
+    title: Mapped[str] = mapped_column(String(240))
+    content: Mapped[str] = mapped_column(Text)
+    job_id: Mapped[str] = mapped_column(ForeignKey('background_jobs.id'))
+class RefreshSession(Record, Base):
+    __tablename__ = 'refresh_sessions'
+    token_hash: Mapped[str] = mapped_column(String(64),unique=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'))
+    revoked: Mapped[bool] = mapped_column(default=False)
+    expires_at: Mapped[str] = mapped_column(String(40))

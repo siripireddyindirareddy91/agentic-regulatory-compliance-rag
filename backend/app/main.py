@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, delete
 from .models import Base, engine, Session, User, Document, Chunk, Requirement, Finding, Workflow, Review, Action, Audit, Source, Setting, Notification, PolicyMapping, Attachment, now, uid, URL
-from .security import session, current, roles, passwords, token, decode
+from .security import session, current, roles, passwords, token, decode, issue_refresh, rotate_refresh
 from .audit import log, verify
 from .rag import extract, index, search
 from .risk import assess, WEIGHTS, configured_weights
@@ -67,19 +67,24 @@ def login(body:Login,db=Depends(session)):
     user=db.scalar(select(User).where(User.email==body.email.lower()))
     if not user or not passwords.verify(body.password,user.password_hash): fail(401,'Invalid email or password')
     save(db,user,'auth.login',user.id)
-    return {'access_token':token(user),'refresh_token':token(user,'refresh'),'user':data(user)}
+    return {'access_token':token(user),'refresh_token':issue_refresh(db,user),'user':data(user)}
 @app.post('/api/auth/register')
 def register(body:Register,db=Depends(session)):
     if '@' not in body.email or len(body.password)<12: fail(422,'Valid email and password of at least 12 characters required')
     if db.scalar(select(User).where(User.email==body.email.lower())): fail(409,'Email already registered')
     # New signups get an isolated institution and read-only permissions.
     user=User(email=body.email.lower(),name=body.name,password_hash=passwords.hash(body.password),institution_id=uid(),role='viewer'); db.add(user); db.flush(); save(db,user,'auth.register',user.id)
-    return {'access_token':token(user),'refresh_token':token(user,'refresh'),'user':data(user)}
+    return {'access_token':token(user),'refresh_token':issue_refresh(db,user),'user':data(user)}
 @app.post('/api/auth/refresh')
 def refresh(body:Refresh,db=Depends(session)):
-    user=db.get(User,decode(body.refresh_token,'refresh'))
-    if not user: fail(401,'User not found')
-    return {'access_token':token(user)}
+    return rotate_refresh(db,body.refresh_token)
+@app.post('/api/auth/logout')
+def logout(body:Refresh,user=Depends(current),db=Depends(session)):
+    from .models import RefreshSession
+    row=db.scalar(select(RefreshSession).where(RefreshSession.user_id==user.id,RefreshSession.token_hash==hashlib.sha256(body.refresh_token.encode()).hexdigest()))
+    if row:row.revoked=True
+    save(db,user,'auth.logout',user.id)
+    return {'revoked':True}
 @app.get('/api/auth/me')
 def me(user=Depends(read)): return data(user)
 
@@ -121,6 +126,8 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),kind:str=Form('re
     previous=owned(db,Document,previous_id,user) if previous_id else None
     if previous and previous.kind!=kind: fail(422,'Previous version must have the same document type')
     doc=Document(institution_id=user.institution_id,title=title,kind=kind,authority=authority,source_url=source_url,department=department,jurisdiction=jurisdiction,effective_date=effective_date,publication_date=publication_date,text=text,content_hash=sha,version=previous.version+1 if previous else 1,previous_id=previous.id if previous else None,verification='Unverified upload',status='Indexed')
+    from .ml import predict
+    doc.category=predict(text)['category']
     db.add(doc); db.flush(); index(db,doc,pages)
     import base64
     from .models import OriginalFile
@@ -349,3 +356,6 @@ def report(report_type:str,format:str='csv',user=Depends(read),db=Depends(sessio
 
 from .extensions import mount
 mount(app,read,write,reviewer,owned,allrows,data,save)
+
+from .operations import mount as mount_operations
+mount_operations(app,read,write,admin,owned,allrows,data,save)

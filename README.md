@@ -171,3 +171,16 @@ The Vercel production project is connected to a free Neon PostgreSQL database. `
 ## Limits and next work
 
 This is a functional demonstration and engineering foundation, not a fully certified enterprise product. Automated official-source crawling, OCR, calibrated ML classifiers, trained anomaly models, cross-encoder reranking, FAISS retrieval, durable background queues, external object-storage integration, multi-user notification targeting, refresh-token rotation/revocation and scheduled reports remain future work. Source URLs are metadata and external links; the server does not fetch arbitrary URLs. Settings do not silently activate monitoring or alternate providers. Workflows execute in the request and are suitable for bounded demo documents. Audit chaining is application-level tamper evidence, not legal immutability. No legal or regulatory accuracy certification is claimed.
+
+
+## Automation, trained models and expanded demo
+
+Use the **Automation** button to enable an official source, queue a check, inspect durable jobs, train-model diagnostics, generate background reports and add synthetic scenarios. The sidebar navigation now scrolls independently on short screens.
+
+Vercel cron runs at `05:00 UTC` daily (10:30 IST), protected by the production `CRON_SECRET`. It schedules due sources/reports and processes a bounded batch of three jobs. Continuous processing: `.venv\Scripts\python -m scripts.worker`. Run one worker with SQLite; PostgreSQL supports concurrent SKIP LOCKED workers. Source monitoring requires explicit administrator opt-in and honors robots policies. Configure allowed hosts with `MONITOR_ALLOWED_HOSTS`; arbitrary hosts, private IPs, non-HTTPS and unsafe redirects are blocked. A source listing change is unverified evidence, not an official new mandate.
+
+Retrain local demonstration models with `.venv\Scripts\python scripts/train_models.py`. Exported artifacts allow lightweight production inference without installing sklearn on Vercel. The training set has 90 synthetic rows and the test set has 30; shared templates/vocabulary make the metrics optimistic and unsuitable for claiming real regulatory accuracy. Logistic Regression, Random Forest and Isolation Forest inference are exposed at `/api/ml/predict`. Uploaded documents use the trained category classifier.
+
+New endpoints include `/api/jobs`, `/api/jobs/process`, `/api/monitoring`, `/api/sources/{id}/monitoring`, `/api/ml/status`, `/api/ml/predict`, `/api/report-schedule`, `/api/scheduled-reports`, `/api/demo/expand`, and secret-protected `/api/cron`. Refresh sessions rotate on use; replay and revoked refresh tokens are rejected. Logout revokes refresh access; issued access tokens retain their short expiration.
+
+`docs/REMAINING.md` is the current feature-coverage record and supersedes older limitations listed above.

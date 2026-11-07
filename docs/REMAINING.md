@@ -13,17 +13,25 @@ Implemented in the PostgreSQL update:
 - Controls UI for mapping, weights, evidence upload/download and operational readiness.
 - Original uploaded regulatory/policy bytes retained in PostgreSQL with checksums and authenticated download.
 
-Still not implemented; these prevent calling the entire master prompt complete:
+Implemented in the automation update:
 
-- Automated official-site monitoring with source-specific access rules and scheduling.
-- OCR for scanned PDFs; external object-storage adapter (original files now persist in PostgreSQL).
-- OpenAI or sentence-transformer embedding adapters, FAISS adapter and cross-encoder reranking.
-- Trained and evaluated classification/anomaly models; production ML calibration.
-- Durable background queues, distributed workers and automatic workflow retry backoff.
-- Native LangGraph checkpoint interrupt/resume (the existing human gate is persisted at the application layer).
-- Fully normalized role/permission, department and evidence schemas from the proposed 30+ table design.
-- Refresh-token rotation/revocation, institution administration, invitations and production identity management.
-- User-specific notification delivery and scheduled reports.
-- Full browser end-to-end coverage and visual QA.
+- Daily Vercel cron with secret authentication, configurable source monitoring, official-host allowlist, public-address checks, robots policy, bounded redirects/downloads and change snapshots. Monitoring never labels a changed web page as a verified new mandate.
+- PostgreSQL durable jobs, leased claiming with SKIP LOCKED, lease recovery, three-attempt exponential retry backoff, tenant-scoped administration, continuous standalone worker and scheduled report generation.
+- Trained TF-IDF Logistic Regression, Random Forest and Isolation Forest models with portable inference artifacts and held-out synthetic-data metrics. Document uploads use the trained classifier; the UI also exposes model diagnostics. These models are not production calibrated.
+- Refresh-token rotation/replay rejection and logout revocation, with browser token renewal.
+- Scrollable sidebar navigation and additional idempotent synthetic scenarios, policies, findings, sample review records and corrective actions.
+
+Still incomplete; the entire original master prompt is not complete:
+
+- OCR for scanned PDFs and external object-storage adapter.
+- OpenAI/sentence-transformer embedding adapters, FAISS and cross-encoder reranking.
+- Validation on independently labeled real regulatory datasets and production ML calibration.
+- Native LangGraph checkpoint interruption/resume; existing human gate remains application-level.
+- Full 30+ normalized-table permission/department/evidence schema.
+- Institution invitations, account recovery and enterprise identity management.
+- User-specific notification delivery.
+- Full browser end-to-end and visual QA.
+
+Queue semantics are at-least-once. PostgreSQL worker claims are serialized with SKIP LOCKED; SQLite is intended for a single worker. Job handlers use document hashes, analysis checks or report job IDs for idempotency, but this is not a claim of exactly-once side effects. The serverless cron processes at most three jobs per daily invocation; use a persistent worker for prompt processing of larger queues. Jobs retain failed attempts and retry times. No paid plan is required. Sources can deny automated retrieval; such failures are visible and retried, never reported as successful collection.
 
 The local feature-hash embedding provider is deterministic and requires no paid model API. pgvector storage improves indexing and durability; it does not turn that provider into a trained semantic model. Vercel's former temporary SQLite records are not a reliable historical source: the PostgreSQL database is initialized with the documented synthetic demo scenario. No migration of all former ephemeral instances is claimed.

@@ -89,6 +89,66 @@ def test_policy_mapping_weights_and_evidence(client):
     assert evidence.content==b'Signed review evidence for testing'
     assert client.get('/api/health/ready').json()['ready']
 
+def test_durable_queue_and_reports(client):
+    h=auth(client)
+    queued=client.post('/api/jobs',headers=h,json={'kind':'report'})
+    assert queued.status_code==200,queued.text
+    id=queued.json()['id']
+    result=client.post('/api/jobs/process',headers=h)
+    assert result.status_code==200,result.text
+    assert result.json()['result']['status']=='Completed',result.text
+    job=next(j for j in client.get('/api/jobs',headers=h).json() if j['id']==id)
+    assert job['attempts']==1
+    report=client.get('/api/scheduled-reports/'+job['result']['report_id'],headers=h)
+    assert report.status_code==200 and b'Finding' in report.content
+    assert client.post('/api/jobs/process',headers=auth(client,'viewer')).status_code==403
+    assert client.get('/api/cron').status_code==401
+
+def test_trained_models(client):
+    h=auth(client)
+    status=client.get('/api/ml/status',headers=h)
+    assert status.status_code==200,status.text
+    assert status.json()['metrics']['test_rows']>0
+    response=client.post('/api/ml/predict',headers=h,json={'text':'encryption access security cyber incident response'})
+    assert response.status_code==200,response.text
+    assert response.json()['category']=='Cybersecurity'
+    assert 0<=response.json()['anomaly_score']<=1
+def test_refresh_rotation_and_revocation(client):
+    login=client.post('/api/auth/login',json={'email':'admin@complyintel.demo','password':'Demo-Compliance-2026!'}).json()
+    first=login['refresh_token']
+    rotated=client.post('/api/auth/refresh',json={'refresh_token':first})
+    assert rotated.status_code==200
+    assert client.post('/api/auth/refresh',json={'refresh_token':first}).status_code==401
+    value=rotated.json()
+    h={'Authorization':'Bearer '+value['access_token']}
+    assert client.post('/api/auth/logout',headers=h,json={'refresh_token':value['refresh_token']}).status_code==200
+    assert client.post('/api/auth/refresh',json={'refresh_token':value['refresh_token']}).status_code==401
+
+def test_monitoring_boundaries_and_fetch(client,monkeypatch):
+    import httpx
+    from urllib.parse import urlparse
+    from backend.app import monitoring
+    from backend.app.models import Source,User
+    with pytest.raises(ValueError):monitoring.validate_url('https://127.0.0.1/private')
+    with pytest.raises(ValueError):monitoring.validate_url('http://www.rbi.org.in')
+    real_client=httpx.Client
+    def handler(request):
+        if request.url.path=='/robots.txt':return httpx.Response(200,text='User-agent: *\nAllow: /')
+        return httpx.Response(200,text='<html><script>untrusted()</script><h1>Official source snapshot</h1><p>Publication listing, not a verified mandate.</p></html>')
+    monkeypatch.setattr(monitoring,'validate_url',lambda url:urlparse(url))
+    monkeypatch.setattr(monitoring.httpx,'Client',lambda **kwargs:real_client(transport=httpx.MockTransport(handler),**kwargs))
+    with Session() as db:
+        user=db.query(User).filter(User.email=='admin@complyintel.demo').first()
+        source=Source(institution_id=user.institution_id,name='Test official source',url='https://www.bis.org/list',jurisdiction='International',enabled=True)
+        db.add(source);db.commit()
+        result=monitoring.monitor(db,user,source)
+        assert result['document_id']
+        from backend.app.models import Document
+        doc=db.get(Document,result['document_id'])
+        assert 'untrusted()' not in doc.text
+        assert doc.verification!='Verified official'
+        assert monitoring.monitor(db,user,source)['document_id']==doc.id
+
 def test_audit_tampering(client):
     h=auth(client)
     assert client.get('/api/audit/verify',headers=h).json()['valid']
