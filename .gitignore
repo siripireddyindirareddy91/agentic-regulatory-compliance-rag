@@ -12,5 +12,7 @@ uploads/
 *.log
 .coverage
 test-results/
+*.tsbuildinfo
+frontend/next-env.d.ts
 
 .vercel

@@ -148,10 +148,13 @@ Source documents are never automatically marked official. When evidence is unver
 ```powershell
 .\.venv\Scripts\python -m pytest backend/tests -q
 npm run typecheck --prefix frontend
+npm test --prefix frontend
 npm run build --prefix frontend
 ```
 
 Tests cover authentication, roles, tenant isolation, upload validation, deterministic retrieval, risk boundaries, workflow execution, human confirmation, action authorization, three report formats and audit tampering detection.
+
+Validation on 7 November 2026: 8 backend integration tests passed; 2 frontend validation tests passed; TypeScript and the optimized Next.js production build passed. Live HTTPS checks verified the frontend, API health, login, database dashboard (1 seeded regulation, 6 requirements, 6 findings), and a valid audit chain. Automated browser preview timed out, so visual browser QA was not completed. The npm dependency audit returned zero vulnerabilities after updating Zod.
 
 ## Deployment
 
