@@ -1,0 +1,7 @@
+DEMONSTRATION ONLY. This synthetic document is not an actual RBI or SEBI mandate.
+Section 1. The institution must verify customer identity before opening accounts and retain verification evidence.
+Section 2. The institution shall monitor suspicious transactions daily and escalate alerts within 24 hours.
+Section 3. The institution must encrypt sensitive information and review privileged access every quarter.
+Section 4. The risk committee shall review controls quarterly and retain signed remediation decisions.
+Section 5. The compliance team must provide annual training and keep attendance records.
+Section 6. The institution must ensure incident escalation procedures are documented and tested every six months.

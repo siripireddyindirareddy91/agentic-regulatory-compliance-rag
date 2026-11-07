@@ -1,0 +1,2 @@
+DEMONSTRATION ONLY — Internal Information Security Policy.
+Sensitive customer information is encrypted at rest. Privileged access is reviewed annually. Security incidents are sent to the helpdesk.
