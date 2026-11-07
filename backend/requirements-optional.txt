@@ -1,0 +1,6 @@
+-r requirements.txt
+sentence-transformers>=3
+faiss-cpu>=1.9
+boto3>=1.35
+langgraph-checkpoint-postgres>=3
+langgraph-checkpoint-sqlite>=3

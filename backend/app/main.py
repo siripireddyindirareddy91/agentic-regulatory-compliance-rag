@@ -44,7 +44,7 @@ def save(db,user,event,entity,detail=None): log(db,user,event,entity,detail); db
 def fail(status,message): raise HTTPException(status,message)
 
 @app.get('/api/health')
-def health(): return {'status':'ok','provider':'OpenAI' if os.getenv('OPENAI_API_KEY') else 'local heuristic / demo','demo_mode':os.getenv('DEMO_MODE','true')=='true','storage':'ephemeral demo SQLite' if os.getenv('VERCEL') and URL.startswith('sqlite') else 'PostgreSQL' if 'postgres' in URL else 'local SQLite','live_monitoring':False}
+def health(): return {'status':'ok','provider':'OpenAI' if os.getenv('OPENAI_API_KEY') else 'local heuristic / demo','demo_mode':os.getenv('DEMO_MODE','true')=='true','storage':'ephemeral demo SQLite' if os.getenv('VERCEL') and URL.startswith('sqlite') else 'PostgreSQL' if 'postgres' in URL else 'local SQLite','live_monitoring':True}
 @app.get('/api/health/ready')
 def ready(db=Depends(session)):
     from sqlalchemy import text
@@ -63,9 +63,10 @@ attempts=defaultdict(list)
 def login(body:Login,db=Depends(session)):
     clock=time.monotonic(); attempts[body.email]=[t for t in attempts[body.email] if clock-t<60]
     if len(attempts[body.email])>=10: fail(429,'Too many attempts; retry in a minute')
-    attempts[body.email].append(clock)
     user=db.scalar(select(User).where(User.email==body.email.lower()))
-    if not user or not passwords.verify(body.password,user.password_hash): fail(401,'Invalid email or password')
+    if not user or not passwords.verify(body.password,user.password_hash):
+        attempts[body.email].append(clock);fail(401,'Invalid email or password')
+    attempts.pop(body.email,None)
     save(db,user,'auth.login',user.id)
     return {'access_token':token(user),'refresh_token':issue_refresh(db,user),'user':data(user)}
 @app.post('/api/auth/register')
@@ -131,7 +132,8 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),kind:str=Form('re
     db.add(doc); db.flush(); index(db,doc,pages)
     import base64
     from .models import OriginalFile
-    db.add(OriginalFile(institution_id=user.institution_id,document_id=doc.id,filename=os.path.basename((file.filename or 'document.txt').replace('\\','/'))[:240],content=base64.b64encode(blob).decode(),sha256=sha))
+    from .storage import store
+    db.add(OriginalFile(institution_id=user.institution_id,document_id=doc.id,filename=os.path.basename((file.filename or 'document.txt').replace('\\','/'))[:240],content=store(blob,user.institution_id,doc.id),sha256=sha))
     if previous: previous.status='Superseded'
     save(db,user,'document.uploaded',doc.id,{'filename':os.path.basename(file.filename or ''),'kind':kind,'bytes':len(blob)})
     return data(doc)
@@ -196,6 +198,11 @@ def reindex(user=Depends(admin),db=Depends(session)):
         from .vectors import upsert
         for c in chunks:
             c.vector=embed(c.text); upsert(db,c)
+            from .models import EmbeddingProfile
+            from .providers import name
+            profile=db.scalar(select(EmbeddingProfile).where(EmbeddingProfile.chunk_id==c.id))
+            if profile:profile.provider=name()
+            else:db.add(EmbeddingProfile(institution_id=user.institution_id,chunk_id=c.id,provider=name()))
     save(db,user,'rag.reindexed',''); return {'status':'reindexed'}
 
 @app.get('/api/compliance/findings')
@@ -242,7 +249,11 @@ def decide(id:str,decision:str,body:Decision,user=Depends(reviewer),db=Depends(s
     workflow=owned(db,Workflow,f.workflow_id,user)
     remaining=db.scalar(select(func.count()).select_from(Finding).where(Finding.workflow_id==workflow.id,Finding.review_status.not_in(['Approved','Rejected'])))
     if not remaining:
-        workflow.status='Completed'; workflow.stage='Human review complete'; workflow.state={**workflow.state,'paused':False,'resumed_by':user.id,'resumed_at':now()}; save(db,user,'workflow.resumed',workflow.id)
+        if workflow.state.get('native_checkpoint'):
+            from .workflow import resume
+            resume(db,user,workflow)
+        else:
+            workflow.status='Completed'; workflow.stage='Human review complete'; workflow.state={**workflow.state,'paused':False,'resumed_by':user.id,'resumed_at':now()}; save(db,user,'workflow.legacy_resumed',workflow.id)
     return data(f)
 class ActionBody(BaseModel):
     finding_id:str
@@ -279,10 +290,19 @@ def audit(user=Depends(read),db=Depends(session)): return [data(a) for a in allr
 @app.get('/api/audit/verify')
 def audit_verify(user=Depends(read),db=Depends(session)): return verify(db,user.institution_id)
 @app.get('/api/notifications')
-def notifications(user=Depends(read),db=Depends(session)): return [data(n) for n in allrows(db,Notification,user)]
+def notifications(user=Depends(read),db=Depends(session)):
+    from .notifications import visible
+    return [{**data(n),'read':seen} for n,seen in visible(db,allrows(db,Notification,user),user)]
 @app.patch('/api/notifications/{id}')
 def notification_read(id:str,user=Depends(read),db=Depends(session)):
-    n=owned(db,Notification,id,user); n.read=True; db.commit(); return data(n)
+    from .models import NotificationDelivery
+    n=owned(db,Notification,id,user)
+    deliveries=db.scalars(select(NotificationDelivery).where(NotificationDelivery.notification_id==id)).all()
+    own=next((d for d in deliveries if d.user_id==user.id),None)
+    if deliveries and not own:fail(404,'Notification not found')
+    if own:own.read=True
+    else:n.read=True
+    db.commit();return {**data(n),'read':True}
 @app.get('/api/settings')
 def settings(user=Depends(read),db=Depends(session)): return {s.key:s.value for s in allrows(db,Setting,user)}
 class SettingsBody(BaseModel): value:dict
@@ -359,3 +379,6 @@ mount(app,read,write,reviewer,owned,allrows,data,save)
 
 from .operations import mount as mount_operations
 mount_operations(app,read,write,admin,owned,allrows,data,save)
+
+from .identity import mount as mount_identity
+mount_identity(app,admin,owned,allrows,data,save)

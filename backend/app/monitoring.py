@@ -36,15 +36,19 @@ class PageText(HTMLParser):
     def handle_data(self,data):
         if not self.hidden and data.strip(): self.parts.append(data.strip())
 def monitor(db,user,source):
+    # RBI publishes this machine-readable syndication endpoint. Read the feed only;
+    # do not crawl linked pages when the site's robots endpoint is inaccessible.
+    rbi_feed=urlparse(source.url).hostname in ('www.rbi.org.in','rbi.org.in') and urlparse(source.url).path in ('','/','/notifications_rss.xml')
+    if rbi_feed:source.url='https://www.rbi.org.in/notifications_rss.xml'
     p=validate_url(source.url)
     state=db.scalar(select(MonitorState).where(MonitorState.source_id==source.id))
     if not state: state=MonitorState(institution_id=source.institution_id,source_id=source.id);db.add(state);db.flush()
     with httpx.Client(timeout=10,follow_redirects=False,headers={'User-Agent':'ComplyIntelMonitor/1.0 (+manual compliance review)'}) as client:
         robots_url=p.scheme+'://'+p.netloc+'/robots.txt'
         try:
-            robots,_,_=bounded_fetch(client,robots_url,65536)
+            robots,_,_=bounded_fetch(client,robots_url,65536) if not rbi_feed else (b'','text/plain',robots_url)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code!=404: raise ValueError('Cannot establish source access rules')
+            if exc.response.status_code!=404: raise ValueError('Cannot establish source access rules: HTTP '+str(exc.response.status_code))
             robots=b''
         parser=RobotFileParser();parser.parse(robots.decode('utf-8','replace').splitlines())
         if not parser.can_fetch('ComplyIntelMonitor',source.url): raise ValueError('Source robots.txt disallows monitoring')
@@ -53,7 +57,18 @@ def monitor(db,user,source):
             from datetime import datetime,timezone
             if (datetime.now(timezone.utc)-datetime.fromisoformat(state.last_checked)).total_seconds()<delay: raise ValueError('Source crawl-delay has not elapsed')
         blob,ctype,url=bounded_fetch(client,source.url)
-    if 'pdf' in ctype: pages=extract(blob,'source.pdf'); text='\n'.join(t for _,t in pages)
+    if rbi_feed:
+        import xml.etree.ElementTree as ET
+        if b'<!DOCTYPE' in blob.upper() or b'<!ENTITY' in blob.upper():raise ValueError('Unsafe XML declaration rejected')
+        root=ET.fromstring(blob)
+        if root.tag!='rss':raise ValueError('RBI endpoint did not return an RSS feed')
+        items=[]
+        for item in root.findall('./channel/item')[:50]:
+            html=PageText();html.feed(item.findtext('description',''))
+            items.append('\n'.join([item.findtext('title',''),item.findtext('pubDate',''),item.findtext('link',''),' '.join(html.parts)]))
+        if not items:raise ValueError('RBI feed contains no notification entries')
+        text='RBI OFFICIAL RSS FEED — notification metadata, not independently verified mandates.\n\n'+'\n\n'.join(items);pages=[(1,text)]
+    elif 'pdf' in ctype: pages=extract(blob,'source.pdf'); text='\n'.join(t for _,t in pages)
     else:
         html=PageText();html.feed(blob.decode('utf-8','replace'));text='\n'.join(html.parts);pages=[(1,text)]
     if not text.strip(): raise ValueError('No extractable source text')
@@ -61,7 +76,7 @@ def monitor(db,user,source):
     doc=db.scalar(select(Document).where(Document.institution_id==user.institution_id,Document.content_hash==digest))
     if not doc:
         previous=db.scalar(select(Document).where(Document.institution_id==user.institution_id,Document.source_url==url).order_by(Document.created_at.desc()))
-        doc=Document(institution_id=user.institution_id,title=source.name+' · monitored source snapshot',authority=source.name,jurisdiction=source.jurisdiction,text=text,content_hash=digest,source_url=url,verification='Retrieved official host / content unverified',kind='regulation',previous_id=previous.id if previous else None,version=previous.version+1 if previous else 1)
+        doc=Document(institution_id=user.institution_id,title=source.name+' · monitored source snapshot',authority=source.name,jurisdiction=source.jurisdiction,text=text,content_hash=digest,source_url=url,verification='Official host / unverified',kind='regulation',previous_id=previous.id if previous else None,version=previous.version+1 if previous else 1)
         db.add(doc);db.flush();index(db,doc,pages)
         db.add(Notification(institution_id=user.institution_id,title=source.name+(': source content changed; human review required' if changed else ': initial source snapshot collected')))
     state.last_checked=now();state.last_hash=digest;state.status='Changed' if changed else 'Fetched';state.detail={'document_id':doc.id,'source_url':url,'notice':'A source-page change is not a verified new regulatory mandate.'}

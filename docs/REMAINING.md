@@ -21,16 +21,22 @@ Implemented in the automation update:
 - Refresh-token rotation/replay rejection and logout revocation, with browser token renewal.
 - Scrollable sidebar navigation and additional idempotent synthetic scenarios, policies, findings, sample review records and corrective actions.
 
-Still incomplete; the entire original master prompt is not complete:
+Implemented in the retrieval and identity update:
 
-- OCR for scanned PDFs and external object-storage adapter.
-- OpenAI/sentence-transformer embedding adapters, FAISS and cross-encoder reranking.
-- Validation on independently labeled real regulatory datasets and production ML calibration.
-- Native LangGraph checkpoint interruption/resume; existing human gate remains application-level.
-- Full 30+ normalized-table permission/department/evidence schema.
-- Institution invitations, account recovery and enterprise identity management.
-- User-specific notification delivery.
-- Full browser end-to-end and visual QA.
+- RBI monitoring uses its published notifications_rss.xml syndication feed, reads notification metadata, and does not crawl linked pages when robots access is unavailable. Fixed a PostgreSQL verification-label length error caught by live testing.
+- Native LangGraph checkpoints backed by PostgreSQL in cloud and SQLite locally. A real interrupt pauses the graph; all final human decisions resume the saved graph. Older investigations retain their explicitly labeled legacy gate.
+- Optional OpenAI and sentence-transformer embedding adapters, FAISS local search and cross-encoder reranking. Provider profiles prevent comparing vectors from different embedding backends; reindex after changing providers.
+- Optional PyMuPDF/Tesseract OCR and private S3-compatible original-file storage adapters. Durable PostgreSQL originals remain the default.
+- Administrator-issued, expiring, single-use invitations and recovery links, role-restricted provisioning and refresh-session revocation after recovery.
+- New finding notifications have individual reviewer/admin deliveries and per-user read state; old tenant-wide notifications remain legacy broadcasts.
+
+Still incomplete or externally unverified; the entire original master prompt is not complete:
+
+- Independently labeled real regulatory evaluation data and production model calibration. Synthetic training metrics cannot establish real-world accuracy.
+- Enterprise identity-provider SSO, account recovery delivery infrastructure and independent security review. Current recovery is administrator-assisted link sharing.
+- Full 30+ normalized-table permission/department/evidence schema; current operational schema consolidates these entities.
+- OCR requires a backend with Tesseract; sentence-transformers/FAISS/cross-encoder require optional packages and model downloads; S3 requires a configured private bucket. Those external integrations are not provisioned or live-validated on Vercel.
+- Full browser end-to-end and visual QA. Windows computer-use verification stopped because the tool could not establish the current browser URL; no browser-safety barrier was bypassed.
 
 Queue semantics are at-least-once. PostgreSQL worker claims are serialized with SKIP LOCKED; SQLite is intended for a single worker. Job handlers use document hashes, analysis checks or report job IDs for idempotency, but this is not a claim of exactly-once side effects. The serverless cron processes at most three jobs per daily invocation; use a persistent worker for prompt processing of larger queues. Jobs retain failed attempts and retry times. No paid plan is required. Sources can deny automated retrieval; such failures are visible and retried, never reported as successful collection.
 

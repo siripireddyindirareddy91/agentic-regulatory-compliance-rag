@@ -184,3 +184,14 @@ Retrain local demonstration models with `.venv\Scripts\python scripts/train_mode
 New endpoints include `/api/jobs`, `/api/jobs/process`, `/api/monitoring`, `/api/sources/{id}/monitoring`, `/api/ml/status`, `/api/ml/predict`, `/api/report-schedule`, `/api/scheduled-reports`, `/api/demo/expand`, and secret-protected `/api/cron`. Refresh sessions rotate on use; replay and revoked refresh tokens are rejected. Logout revokes refresh access; issued access tokens retain their short expiration.
 
 `docs/REMAINING.md` is the current feature-coverage record and supersedes older limitations listed above.
+
+
+## Retrieval and identity adapters
+
+Install optional backend packages with `pip install -r backend/requirements-optional.txt` on a dedicated backend. Set `EMBEDDING_PROVIDER=openai` with an API key, or `sentence-transformers` with an installed model. Sentence embeddings are truncated/padded and normalized to the platform's 256 dimensions. Run `/api/rag/reindex` after changing providers. `VECTOR_STORE=faiss` enables local FAISS scoring; `RERANKER_PROVIDER=cross-encoder` enables reranking. These heavyweight models are not installed in the default Vercel bundle.
+
+`OCR_ENABLED=true` uses PyMuPDF's Tesseract OCR for pages with no text; install Tesseract and set `TESSDATA_PREFIX` on that backend. `S3_BUCKET`, optional `S3_ENDPOINT_URL` and standard AWS environment credentials enable encrypted private S3 original-file storage. PostgreSQL remains the no-extra-service default. Optional integrations need operator configuration and live validation.
+
+New investigations now interrupt and checkpoint natively in LangGraph. PostgreSQL checkpoints survive redeployment. Final human decisions resume the saved graph; legacy investigations remain compatible. Administrators can use **Access** to issue invitations and recovery links. Account links expire in 24 hours, are single-use, and must be shared privately. New review notifications are targeted to administrators and reviewers.
+
+Validation: 16 backend tests and two frontend validation tests passed with TypeScript checks. Browser visual verification was stopped by the computer-use tool because it could not verify the current browser URL. See `docs/REMAINING.md` for unverified external adapters and remaining enterprise work.

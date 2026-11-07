@@ -22,7 +22,7 @@ class State(TypedDict, total=False):
     paused:bool
     errors:list
 
-def build_graph(db, user, run):
+def build_graph(db, user, run, checkpointer=None):
     def step(name, fn):
         def execute(state):
             result=fn(state)
@@ -81,19 +81,32 @@ def build_graph(db, user, run):
             req=db.get(Requirement,f['requirement_id']); chunk=db.get(Chunk,req.chunk_id)
             record=Finding(institution_id=user.institution_id,requirement_id=req.id,workflow_id=run.id,title=req.title,description='Heuristic interpretation: policy retrieval does not establish control effectiveness. A compliance officer must verify this potential gap.',department=req.department,status='Requires human verification',risk_score=f['score'],risk_level=f['level'],factors=f['factors'],evidence=[citation(chunk,doc)],policy_evidence=f['policies'],recommendation=f['recommendation'],confidence=.65,review_status='Pending')
             db.add(record)
-        if s['findings']: db.add(Notification(institution_id=user.institution_id,title=f'{len(s["findings"])} findings await human review'))
+        if s['findings']:
+            notification=Notification(institution_id=user.institution_id,title=f'{len(s["findings"])} findings await human review');db.add(notification)
+            from .notifications import deliver
+            deliver(db,notification)
         return {'paused':bool(s['findings'])}
     def audit(s):
         run.status='Awaiting human review' if s.get('paused') else 'Completed'
-        run.state={k:v for k,v in s.items() if k not in ('evidence','findings')}
+        run.state={**{k:v for k,v in s.items() if k not in ('evidence','findings')},'native_checkpoint':True}
         log(db,user,'workflow.paused' if s.get('paused') else 'workflow.completed',run.id,{'findings':len(s['findings'])})
         return {}
     graph=StateGraph(State)
+    def human_gate(s):
+        if s.get('paused'):
+            from langgraph.types import interrupt
+            interrupt({'workflow_id':run.id,'reason':'Authorized human review required for all findings'})
+            pending=db.scalar(select(Finding).where(Finding.workflow_id==run.id,Finding.review_status.not_in(['Approved','Rejected'])).limit(1))
+            if pending:raise ValueError('All findings require final human decisions before resume')
+            run.status='Completed';run.stage='Human review complete';run.state={**run.state,'paused':False,'resumed_by':user.id,'resumed_at':now()}
+            log(db,user,'workflow.native_resumed',run.id)
+        return {'paused':False}
+    graph.add_node('human_gate',human_gate)
     for name,fn in [('ingestion',ingestion),('changes',changes),('requirements',requirements),('retrieval',retrieval),('gaps',gaps),('risk',risk),('recommendations',recommendations),('validation',validation),('escalation',escalation),('audit',audit)]: graph.add_node(name,step(name,fn))
     graph.add_edge(START,'ingestion')
-    for a,b in [('ingestion','changes'),('changes','requirements'),('requirements','retrieval'),('retrieval','gaps'),('gaps','risk'),('risk','recommendations'),('recommendations','validation'),('escalation','audit'),('audit',END)]: graph.add_edge(a,b)
+    for a,b in [('ingestion','changes'),('changes','requirements'),('requirements','retrieval'),('retrieval','gaps'),('gaps','risk'),('risk','recommendations'),('recommendations','validation'),('escalation','audit'),('audit','human_gate'),('human_gate',END)]: graph.add_edge(a,b)
     graph.add_conditional_edges('validation',lambda s:'retrieval' if s['insufficient'] and s['attempts']<2 else 'escalation',{'retrieval':'retrieval','escalation':'escalation'})
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 def execute(db,user,doc):
     if doc.kind!='regulation': raise ValueError('Analyze a regulatory document; policies provide comparison evidence')
@@ -101,10 +114,21 @@ def execute(db,user,doc):
     if existing: return existing
     run=Workflow(institution_id=user.institution_id,document_id=doc.id,steps=[],state={},errors=[]); db.add(run); db.flush()
     try:
-        build_graph(db,user,run).invoke({'workflow_id':run.id,'document_id':doc.id,'tenant':user.institution_id})
+        from .checkpoints import saver
+        with saver() as checkpoint:
+            build_graph(db,user,run,checkpoint).invoke({'workflow_id':run.id,'document_id':doc.id,'tenant':user.institution_id},config={'configurable':{'thread_id':run.id}})
         doc.status='Analyzed'; db.commit()
     except Exception as exc:
         db.rollback()
         run=Workflow(institution_id=user.institution_id,document_id=doc.id,status='Failed',stage='Failed',steps=[],state={},errors=[str(exc)[:500]])
         db.add(run); log(db,user,'workflow.failed',doc.id,{'error':str(exc)[:500]}); db.commit()
     return run
+def resume(db,user,run):
+    from .checkpoints import saver
+    from langgraph.types import Command
+    with saver() as checkpoint:
+        graph=build_graph(db,user,run,checkpoint)
+        config={'configurable':{'thread_id':run.id}}
+        if not graph.get_state(config).next:raise ValueError('No interrupted checkpoint found')
+        graph.invoke(Command(resume={'reviewed_by':user.id}),config=config)
+    db.commit()

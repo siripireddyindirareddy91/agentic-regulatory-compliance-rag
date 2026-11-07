@@ -149,6 +149,48 @@ def test_monitoring_boundaries_and_fetch(client,monkeypatch):
         assert doc.verification!='Verified official'
         assert monitoring.monitor(db,user,source)['document_id']==doc.id
 
+def test_native_checkpoint_resume(client):
+    h=auth(client)
+    doc=client.post('/api/regulations/upload',headers=h,data={'title':'Native checkpoint example'},files={'file':('checkpoint.txt',b'DEMO ONLY. The institution must review access controls and retain signed evidence.','text/plain')}).json()
+    run=client.post('/api/regulations/'+doc['id']+'/analyze',headers=h).json()
+    assert run['state']['native_checkpoint'] is True
+    assert run['status']=='Awaiting human review'
+    findings=[f for f in client.get('/api/compliance/findings',headers=h).json() if f['workflow_id']==run['id']]
+    for f in findings:
+        r=client.post('/api/reviews/'+f['id']+'/approve',headers=h,json={'confirmed':True,'comment':'Synthetic native checkpoint test review'})
+        assert r.status_code==200,r.text
+    assert client.get('/api/agents/executions/'+run['id'],headers=h).json()['status']=='Completed'
+
+def test_identity_and_targeted_notifications(client):
+    h=auth(client)
+    invitation=client.post('/api/admin/invitations',headers=h,json={'email':'invited@example.com','role':'viewer'})
+    assert invitation.status_code==200,invitation.text
+    body={'token':invitation.json()['token'],'name':'Invited User','password':'Invited-password-2026!'}
+    assert client.post('/api/auth/redeem',json=body).status_code==200
+    assert client.post('/api/auth/redeem',json=body).status_code==401
+    assert client.post('/api/admin/invitations',headers=auth(client,'viewer'),json={'email':'bad@example.com','role':'admin'}).status_code==403
+    viewers=client.get('/api/notifications',headers=auth(client,'viewer')).json()
+    reviewers=client.get('/api/notifications',headers=auth(client,'reviewer')).json()
+    assert len(reviewers)>len(viewers)
+
+def test_rbi_published_feed(client,monkeypatch):
+    import httpx
+    from urllib.parse import urlparse
+    from backend.app import monitoring
+    from backend.app.models import Source,User
+    real=httpx.Client;requested=[]
+    def handler(request):
+        requested.append(str(request.url))
+        return httpx.Response(200,headers={'content-type':'text/xml'},text='<rss><channel><item><title>Official notice metadata</title><link>https://www.rbi.org.in/notice</link><description>Test feed entry</description></item></channel></rss>')
+    monkeypatch.setattr(monitoring,'validate_url',lambda url:urlparse(url))
+    monkeypatch.setattr(monitoring.httpx,'Client',lambda **kwargs:real(transport=httpx.MockTransport(handler),**kwargs))
+    with Session() as db:
+        user=db.query(User).filter(User.email=='admin@complyintel.demo').first()
+        source=Source(institution_id=user.institution_id,name='RBI feed test',url='https://www.rbi.org.in',jurisdiction='India',enabled=True)
+        db.add(source);db.commit();result=monitoring.monitor(db,user,source)
+        assert result['document_id']
+        assert requested==['https://www.rbi.org.in/notifications_rss.xml']
+
 def test_audit_tampering(client):
     h=auth(client)
     assert client.get('/api/audit/verify',headers=h).json()['valid']

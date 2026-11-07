@@ -183,3 +183,21 @@ class RefreshSession(Record, Base):
     user_id: Mapped[str] = mapped_column(ForeignKey('users.id'))
     revoked: Mapped[bool] = mapped_column(default=False)
     expires_at: Mapped[str] = mapped_column(String(40))
+class EmbeddingProfile(Record, Base):
+    __tablename__ = 'embedding_profiles'
+    chunk_id: Mapped[str] = mapped_column(ForeignKey('document_chunks.id'),unique=True)
+    provider: Mapped[str] = mapped_column(String(160))
+class AccessGrant(Record, Base):
+    __tablename__ = 'account_access_grants'
+    email: Mapped[str] = mapped_column(String(240))
+    token_hash: Mapped[str] = mapped_column(String(64),unique=True)
+    purpose: Mapped[str] = mapped_column(String(20))
+    role: Mapped[str] = mapped_column(String(30),default='viewer')
+    expires_at: Mapped[str] = mapped_column(String(40))
+    consumed: Mapped[bool] = mapped_column(default=False)
+class NotificationDelivery(Record, Base):
+    __tablename__ = 'notification_deliveries'
+    notification_id: Mapped[str] = mapped_column(ForeignKey('notifications.id'),index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'),index=True)
+    read: Mapped[bool] = mapped_column(default=False)
+    __table_args__=(UniqueConstraint('notification_id','user_id'),)

@@ -8,6 +8,8 @@ out/
 __pycache__/
 .pytest_cache/
 *.db
+*.checkpoints
+*.checkpoints-*
 uploads/
 *.log
 .coverage

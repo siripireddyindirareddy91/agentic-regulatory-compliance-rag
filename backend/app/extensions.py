@@ -15,7 +15,8 @@ def mount(app,read,write,reviewer,owned,allrows,data,save):
         source=db.scalar(select(OriginalFile).where(OriginalFile.document_id==id,OriginalFile.institution_id==user.institution_id))
         if not source: raise HTTPException(404,'Original file is unavailable for seeded or older documents')
         save(db,user,'document.original_downloaded',id,{'sha256':source.sha256})
-        return Response(base64.b64decode(source.content),media_type='application/octet-stream',headers={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(source.filename),'X-Content-Type-Options':'nosniff'})
+        from .storage import load
+        return Response(load(source.content),media_type='application/octet-stream',headers={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(source.filename),'X-Content-Type-Options':'nosniff'})
     @app.get('/api/requirements')
     def requirements(user=Depends(read),db=Depends(session)):
         return [data(r) for r in allrows(db,Requirement,user)]
