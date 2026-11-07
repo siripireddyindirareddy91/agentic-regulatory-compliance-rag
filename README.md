@@ -122,7 +122,7 @@ SQLite works locally without external services. For durable deployment use `DATA
 | NEXT_PUBLIC_API_URL | Frontend build-time backend URL; empty uses same origin |
 | APP_ENV | development or production |
 
-`REDIS_URL`, `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `VECTOR_STORE`, and `UPLOAD_DIRECTORY` are reserved example settings; alternate embedding/vector providers, Redis jobs and original-file object storage are not wired into this release. Extracted text is persisted in the database; original upload bytes are not retained.
+`REDIS_URL`, `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `VECTOR_STORE`, and `UPLOAD_DIRECTORY` are reserved example settings; alternate embedding/vector providers, Redis jobs and original-file object storage are not wired into this release. Extracted text and original upload bytes are persisted in the database; authenticated original-file downloads include a stored SHA-256 checksum.
 
 ## API
 
@@ -170,4 +170,4 @@ The Vercel production project is connected to a free Neon PostgreSQL database. `
 
 ## Limits and next work
 
-This is a functional demonstration and engineering foundation, not a fully certified enterprise product. Automated official-source crawling, OCR, calibrated ML classifiers, trained anomaly models, cross-encoder reranking, FAISS retrieval, durable background queues, original-document object storage, multi-user notification targeting, refresh-token rotation/revocation and scheduled reports remain future work. Source URLs are metadata and external links; the server does not fetch arbitrary URLs. Settings do not silently activate monitoring or alternate providers. Workflows execute in the request and are suitable for bounded demo documents. Audit chaining is application-level tamper evidence, not legal immutability. No legal or regulatory accuracy certification is claimed.
+This is a functional demonstration and engineering foundation, not a fully certified enterprise product. Automated official-source crawling, OCR, calibrated ML classifiers, trained anomaly models, cross-encoder reranking, FAISS retrieval, durable background queues, external object-storage integration, multi-user notification targeting, refresh-token rotation/revocation and scheduled reports remain future work. Source URLs are metadata and external links; the server does not fetch arbitrary URLs. Settings do not silently activate monitoring or alternate providers. Workflows execute in the request and are suitable for bounded demo documents. Audit chaining is application-level tamper evidence, not legal immutability. No legal or regulatory accuracy certification is claimed.

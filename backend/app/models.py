@@ -143,3 +143,9 @@ class Attachment(Record, Base):
     content: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(String(64))
     uploaded_by: Mapped[str] = mapped_column(ForeignKey('users.id'))
+class OriginalFile(Record, Base):
+    __tablename__ = 'original_document_files'
+    document_id: Mapped[str] = mapped_column(ForeignKey('regulatory_documents.id'),unique=True)
+    filename: Mapped[str] = mapped_column(String(240))
+    content: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))

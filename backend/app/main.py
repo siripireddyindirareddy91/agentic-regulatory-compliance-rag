@@ -122,6 +122,9 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),kind:str=Form('re
     if previous and previous.kind!=kind: fail(422,'Previous version must have the same document type')
     doc=Document(institution_id=user.institution_id,title=title,kind=kind,authority=authority,source_url=source_url,department=department,jurisdiction=jurisdiction,effective_date=effective_date,publication_date=publication_date,text=text,content_hash=sha,version=previous.version+1 if previous else 1,previous_id=previous.id if previous else None,verification='Unverified upload',status='Indexed')
     db.add(doc); db.flush(); index(db,doc,pages)
+    import base64
+    from .models import OriginalFile
+    db.add(OriginalFile(institution_id=user.institution_id,document_id=doc.id,filename=os.path.basename((file.filename or 'document.txt').replace('\\','/'))[:240],content=base64.b64encode(blob).decode(),sha256=sha))
     if previous: previous.status='Superseded'
     save(db,user,'document.uploaded',doc.id,{'filename':os.path.basename(file.filename or ''),'kind':kind,'bytes':len(blob)})
     return data(doc)

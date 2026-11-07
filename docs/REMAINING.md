@@ -11,11 +11,12 @@ Implemented in the PostgreSQL update:
 - Overdue-action escalation with notifications and audit events.
 - Failed workflow retry endpoint.
 - Controls UI for mapping, weights, evidence upload/download and operational readiness.
+- Original uploaded regulatory/policy bytes retained in PostgreSQL with checksums and authenticated download.
 
 Still not implemented; these prevent calling the entire master prompt complete:
 
 - Automated official-site monitoring with source-specific access rules and scheduling.
-- OCR for scanned PDFs; original regulatory file object-storage retention.
+- OCR for scanned PDFs; external object-storage adapter (original files now persist in PostgreSQL).
 - OpenAI or sentence-transformer embedding adapters, FAISS adapter and cross-encoder reranking.
 - Trained and evaluated classification/anomaly models; production ML calibration.
 - Durable background queues, distributed workers and automatic workflow retry backoff.

@@ -4,10 +4,18 @@ from fastapi import Depends, File, UploadFile, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from .models import Document, Requirement, Finding, PolicyMapping, Attachment, Action, Workflow, Notification, now
+from .models import Document, Requirement, Finding, PolicyMapping, Attachment, OriginalFile, Action, Workflow, Notification, now
 from .security import session
 
 def mount(app,read,write,reviewer,owned,allrows,data,save):
+    @app.get('/api/documents/{id}/original')
+    def original(id:str,user=Depends(read),db=Depends(session)):
+        from urllib.parse import quote
+        owned(db,Document,id,user)
+        source=db.scalar(select(OriginalFile).where(OriginalFile.document_id==id,OriginalFile.institution_id==user.institution_id))
+        if not source: raise HTTPException(404,'Original file is unavailable for seeded or older documents')
+        save(db,user,'document.original_downloaded',id,{'sha256':source.sha256})
+        return Response(base64.b64decode(source.content),media_type='application/octet-stream',headers={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(source.filename),'X-Content-Type-Options':'nosniff'})
     @app.get('/api/requirements')
     def requirements(user=Depends(read),db=Depends(session)):
         return [data(r) for r in allrows(db,Requirement,user)]

@@ -48,6 +48,7 @@ def test_upload_workflow_review_action_report(client):
     r=client.post('/api/regulations/upload',headers=h,data={'title':'Synthetic test circular','authority':'Demo'},files={'file':('test.txt',text,'text/plain')})
     assert r.status_code==200,r.text
     doc=r.json()
+    assert client.get('/api/documents/'+doc['id']+'/original',headers=h).content==text
     duplicate=client.post('/api/regulations/upload',headers=h,data={'title':'Duplicate'},files={'file':('test.txt',text,'text/plain')})
     assert duplicate.status_code==409
     workflow=client.post('/api/regulations/'+doc['id']+'/analyze',headers=h)
