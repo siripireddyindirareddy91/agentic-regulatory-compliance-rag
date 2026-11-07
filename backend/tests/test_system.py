@@ -69,6 +69,25 @@ def test_upload_workflow_review_action_report(client):
 def test_file_validation(client):
     h=auth(client)
     assert client.post('/api/regulations/upload',headers=h,data={'title':'Bad file'},files={'file':('bad.exe',b'not executable actually','application/octet-stream')}).status_code==415
+def test_policy_mapping_weights_and_evidence(client):
+    h=auth(client)
+    req=client.get('/api/requirements',headers=h).json()[0]
+    policy=client.get('/api/policies',headers=h).json()[0]
+    r=client.post('/api/policies/'+policy['id']+'/map',headers=h,json={'requirement_id':req['id'],'notes':'Human mapped control evidence'})
+    assert r.status_code==200,r.text
+    assert client.get('/api/policies/'+policy['id']+'/mappings',headers=h).json()
+    invalid=client.patch('/api/settings/risk_weights',headers=h,json={'value':{'severity':1}})
+    assert invalid.status_code==422
+    weights={'severity':.4,'likelihood':.2,'regulatory_impact':.2,'operational_impact':.2}
+    assert client.patch('/api/settings/risk_weights',headers=h,json={'value':weights}).status_code==200
+    action=client.get('/api/actions',headers=h).json()[0]
+    r=client.post('/api/actions/'+action['id']+'/evidence',headers=h,files={'file':('signed-evidence.txt',b'Signed review evidence for testing','text/plain')})
+    assert r.status_code==200,r.text
+    assert 'content' not in r.json()
+    evidence=client.get('/api/evidence/'+r.json()['id']+'/download',headers=h)
+    assert evidence.content==b'Signed review evidence for testing'
+    assert client.get('/api/health/ready').json()['ready']
+
 def test_audit_tampering(client):
     h=auth(client)
     assert client.get('/api/audit/verify',headers=h).json()['valid']

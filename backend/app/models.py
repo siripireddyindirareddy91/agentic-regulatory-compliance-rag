@@ -10,7 +10,8 @@ def now(): return datetime.now(timezone.utc).isoformat()
 URL = os.getenv('DATABASE_URL') or ('sqlite:////tmp/complyintel.db' if os.getenv('VERCEL') else 'sqlite:///./compliance.db')
 if URL.startswith('postgres://'): URL = URL.replace('postgres://', 'postgresql+psycopg://', 1)
 elif URL.startswith('postgresql://'): URL = URL.replace('postgresql://', 'postgresql+psycopg://', 1)
-engine = create_engine(URL, connect_args={'check_same_thread': False} if URL.startswith('sqlite') else {}, pool_pre_ping=True)
+from sqlalchemy.pool import NullPool
+engine = create_engine(URL, connect_args={'check_same_thread': False} if URL.startswith('sqlite') else {'connect_timeout':15}, pool_pre_ping=True, **({'poolclass':NullPool} if os.getenv('VERCEL') else {}))
 Session = sessionmaker(engine, expire_on_commit=False)
 class Base(DeclarativeBase): pass
 class Record:
@@ -127,3 +128,18 @@ class Notification(Record, Base):
     __tablename__ = 'notifications'
     title: Mapped[str] = mapped_column(String(300))
     read: Mapped[bool] = mapped_column(default=False)
+class PolicyMapping(Record, Base):
+    __tablename__ = 'policy_requirement_mappings'
+    policy_id: Mapped[str] = mapped_column(ForeignKey('regulatory_documents.id'), index=True)
+    requirement_id: Mapped[str] = mapped_column(ForeignKey('regulatory_requirements.id'), index=True)
+    notes: Mapped[str] = mapped_column(Text, default='')
+    mapped_by: Mapped[str] = mapped_column(ForeignKey('users.id'))
+    __table_args__ = (UniqueConstraint('policy_id','requirement_id'),)
+class Attachment(Record, Base):
+    __tablename__ = 'corrective_action_evidence'
+    action_id: Mapped[str] = mapped_column(ForeignKey('corrective_actions.id'), index=True)
+    filename: Mapped[str] = mapped_column(String(240))
+    content_type: Mapped[str] = mapped_column(String(100))
+    content: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))
+    uploaded_by: Mapped[str] = mapped_column(ForeignKey('users.id'))

@@ -1,4 +1,9 @@
 WEIGHTS={'severity':.35,'likelihood':.25,'regulatory_impact':.25,'operational_impact':.15}
+def configured_weights(db,tenant):
+    from sqlalchemy import select
+    from .models import Setting
+    setting=db.scalar(select(Setting).where(Setting.institution_id==tenant,Setting.key=='risk_weights'))
+    return setting.value if setting else WEIGHTS
 def assess(factors, weights=None):
     weights=weights or WEIGHTS
     if abs(sum(weights.values())-1)>0.001: raise ValueError('Risk weights must total 1')

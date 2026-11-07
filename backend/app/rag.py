@@ -39,6 +39,8 @@ def index(db, doc, pages=None):
             section=next((s.strip() for s in part.splitlines() if s.strip()),'Extracted text')[:180]
             db.add(Chunk(institution_id=doc.institution_id, document_id=doc.id, page=page,section=section,text=part,vector=embed(part)))
     db.flush()
+    from .vectors import upsert
+    for chunk in db.scalars(select(Chunk).where(Chunk.document_id==doc.id)): upsert(db,chunk)
 def citation(chunk, doc, score=1):
     return {'chunk_id':chunk.id,'document_id':doc.id,'document':doc.title,'authority':doc.authority,'page':chunk.page,'section':chunk.section,'excerpt':chunk.text,'source_url':doc.source_url,'version':doc.version,'jurisdiction':doc.jurisdiction,'publication_date':doc.publication_date,'verification':doc.verification,'demo':doc.demo,'score':round(score,4)}
 def search(db, tenant, query, kind=None, authority=None, limit=6):
@@ -46,9 +48,11 @@ def search(db, tenant, query, kind=None, authority=None, limit=6):
     if kind: stmt=stmt.where(Document.kind==kind)
     if authority: stmt=stmt.where(Document.authority==authority)
     qvec=embed(query); qwords=set(words(query)); ranked=[]
+    from .vectors import nearest
+    semantic=nearest(db,tenant,qvec)
     for c,d in db.execute(stmt):
         lex=len(qwords & set(words(c.text)))/max(len(qwords),1)
-        cosine=sum(a*b for a,b in zip(qvec,c.vector))
+        cosine=semantic.get(c.id,0) if semantic is not None else sum(a*b for a,b in zip(qvec,c.vector))
         score=.55*max(cosine,0)+.45*lex
         if score>.04: ranked.append(citation(c,d,score))
     return sorted(ranked,key=lambda x:x['score'],reverse=True)[:limit]

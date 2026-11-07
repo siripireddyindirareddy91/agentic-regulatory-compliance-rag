@@ -7,18 +7,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, delete
-from .models import Base, engine, Session, User, Document, Chunk, Requirement, Finding, Workflow, Review, Action, Audit, Source, Setting, Notification, now, uid, URL
+from .models import Base, engine, Session, User, Document, Chunk, Requirement, Finding, Workflow, Review, Action, Audit, Source, Setting, Notification, PolicyMapping, Attachment, now, uid, URL
 from .security import session, current, roles, passwords, token, decode
 from .audit import log, verify
 from .rag import extract, index, search
-from .risk import assess, WEIGHTS
+from .risk import assess, WEIGHTS, configured_weights
 from .workflow import execute, AGENTS
 
 @asynccontextmanager
 async def lifespan(app):
-    Base.metadata.create_all(engine)
+    from sqlalchemy import text
+    from .vectors import initialize
+    with engine.begin() as connection:
+        if connection.dialect.name=='postgresql': connection.execute(text('SELECT pg_advisory_xact_lock(1948027)'))
+        Base.metadata.create_all(connection)
+        initialize(connection)
     from .seed import seed
-    with Session() as db: seed(db)
+    with Session() as db:
+        if db.bind.dialect.name=='postgresql': db.execute(text('SELECT pg_advisory_xact_lock(1948028)'))
+        seed(db)
+        db.commit()
     yield
 app=FastAPI(title='ComplyIntel AI',version='1.0.0',lifespan=lifespan,docs_url='/api/docs',openapi_url='/api/openapi.json')
 app.add_middleware(CORSMiddleware,allow_origins=os.getenv('CORS_ORIGINS','http://localhost:3000').split(','),allow_credentials=False,allow_methods=['GET','POST','PATCH'],allow_headers=['Authorization','Content-Type'])
@@ -37,6 +45,13 @@ def fail(status,message): raise HTTPException(status,message)
 
 @app.get('/api/health')
 def health(): return {'status':'ok','provider':'OpenAI' if os.getenv('OPENAI_API_KEY') else 'local heuristic / demo','demo_mode':os.getenv('DEMO_MODE','true')=='true','storage':'ephemeral demo SQLite' if os.getenv('VERCEL') and URL.startswith('sqlite') else 'PostgreSQL' if 'postgres' in URL else 'local SQLite','live_monitoring':False}
+@app.get('/api/health/ready')
+def ready(db=Depends(session)):
+    from sqlalchemy import text
+    db.execute(text('SELECT 1'))
+    pg=db.bind.dialect.name=='postgresql'
+    vectors=db.scalar(text('SELECT count(*) FROM document_embeddings')) if pg else db.scalar(select(func.count()).select_from(Chunk))
+    return {'ready':True,'durable':pg,'database':'PostgreSQL' if pg else 'SQLite','vector_store':'pgvector' if pg else 'local JSON vectors','indexed_vectors':vectors}
 class Login(BaseModel):
     email:str=Field(min_length=3,max_length=240)
     password:str=Field(min_length=1,max_length=200)
@@ -168,7 +183,9 @@ def reindex(user=Depends(admin),db=Depends(session)):
     for d in allrows(db,Document,user):
         chunks=db.scalars(select(Chunk).where(Chunk.document_id==d.id)).all()
         from .rag import embed
-        for c in chunks: c.vector=embed(c.text)
+        from .vectors import upsert
+        for c in chunks:
+            c.vector=embed(c.text); upsert(db,c)
     save(db,user,'rag.reindexed',''); return {'status':'reindexed'}
 
 @app.get('/api/compliance/findings')
@@ -196,7 +213,7 @@ class RiskBody(BaseModel):
 @app.post('/api/risks/assess')
 def risk(body:RiskBody,user=Depends(reviewer),db=Depends(session)):
     f=owned(db,Finding,body.finding_id,user); before={'score':f.risk_score,'factors':f.factors}; factors={k:getattr(body,k) for k in WEIGHTS}
-    f.risk_score,f.risk_level=assess(factors); f.factors=factors; save(db,user,'risk.adjusted',f.id,{'before':before,'after':factors,'reason':body.reason}); return data(f)
+    f.risk_score,f.risk_level=assess(factors,configured_weights(db,user.institution_id)); f.factors=factors; save(db,user,'risk.adjusted',f.id,{'before':before,'after':factors,'weights':configured_weights(db,user.institution_id),'reason':body.reason}); return data(f)
 @app.get('/api/reviews/pending')
 def pending(user=Depends(read),db=Depends(session)): return [data(f) for f in allrows(db,Finding,user) if f.review_status in ['Pending','In Review','Requires More Evidence']]
 class Decision(BaseModel):
@@ -262,10 +279,17 @@ class SettingsBody(BaseModel): value:dict
 @app.patch('/api/settings/{key}')
 def settings_patch(key:str,body:SettingsBody,user=Depends(admin),db=Depends(session)):
     if key not in ['institution','risk_weights','ai']: fail(422,'Unknown setting')
-    if key=='risk_weights': fail(422,'Risk weight editing is disabled in this release; scoring uses documented fixed weights')
+    if key=='risk_weights':
+        weights=body.value
+        if set(weights)!=set(WEIGHTS) or any(not isinstance(v,(int,float)) or not 0<=v<=1 for v in weights.values()) or abs(sum(weights.values())-1)>.001: fail(422,'Four numeric weights from 0 to 1 must total 1')
     s=db.scalar(select(Setting).where(Setting.institution_id==user.institution_id,Setting.key==key))
     if not s: s=Setting(institution_id=user.institution_id,key=key,value=body.value); db.add(s)
     else: s.value=body.value
+    if key=='risk_weights':
+        for f in allrows(db,Finding,user):
+            before=f.risk_score
+            f.risk_score,f.risk_level=assess(f.factors,body.value)
+            log(db,user,'risk.recalculated',f.id,{'before':before,'after':f.risk_score,'weights':body.value})
     save(db,user,'settings.updated',key,body.value); return data(s)
 @app.get('/api/sources')
 def sources(user=Depends(read),db=Depends(session)): return [data(s) for s in allrows(db,Source,user)]
@@ -319,3 +343,6 @@ def report(report_type:str,format:str='csv',user=Depends(read),db=Depends(sessio
             flow.append(Spacer(1,12))
         SimpleDocTemplate(stream).build(flow); payload=stream.getvalue(); mime='application/pdf'
     return StreamingResponse(io.BytesIO(payload),media_type=mime,headers={'Content-Disposition':f'attachment; filename="complyintel-{report_type}.{format}"'})
+
+from .extensions import mount
+mount(app,read,write,reviewer,owned,allrows,data,save)

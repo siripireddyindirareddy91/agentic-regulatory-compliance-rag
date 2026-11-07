@@ -109,7 +109,7 @@ The schema contains users, regulatory documents (including policies), chunks (in
 
 ## Database and configuration
 
-SQLite works locally without external services. For durable deployment use `DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST/DB?sslmode=require`. Migrate with `python -m alembic -c backend/alembic.ini upgrade head`. Startup also creates missing schema for demonstration convenience. Docker uses the pgvector-enabled PostgreSQL image, but this release stores hash embeddings as JSON and computes similarity in the application, not pgvector ANN search.
+SQLite works locally without external services. For durable deployment use `DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST/DB?sslmode=require`. Migrate with `python -m alembic -c backend/alembic.ini upgrade head`. Startup also creates missing schema for demonstration convenience. Docker uses the pgvector-enabled PostgreSQL image, and the application now creates native pgvector embedding storage and an HNSW cosine index. Local SQLite retains JSON-vector fallback.
 
 | Variable | Purpose |
 | --- | --- |
@@ -164,6 +164,10 @@ For Docker: set a random `JWT_SECRET_KEY` in `.env`, then `docker compose up --b
 
 For a dedicated backend, use `render.yaml` with a managed database and set frontend `NEXT_PUBLIC_API_URL` at build time. Do not deploy confidential data with demo credentials.
 
+## PostgreSQL update
+
+The Vercel production project is connected to a free Neon PostgreSQL database. `/api/health/ready` checks actual database connectivity, durability, vector storage and indexed vector count. PostgreSQL-backed records survive redeployments. The Controls button exposes policy mappings, configurable risk weights, persistent evidence attachments and overdue escalation. See [remaining requirements](docs/REMAINING.md) for the current explicit coverage audit.
+
 ## Limits and next work
 
-This is a functional demonstration and engineering foundation, not a fully certified enterprise product. Automated official-source crawling, OCR, calibrated ML classifiers, trained anomaly models, cross-encoder reranking, FAISS/pgvector ANN retrieval, policy mapping CRUD, durable background queues, object-store attachments, multi-user notification targeting, refresh-token rotation/revocation and scheduled reports remain future work. Source URLs are metadata and external links; the server does not fetch arbitrary URLs. Settings do not silently activate monitoring or alternate providers. Workflows execute in the request and are suitable for bounded demo documents. Audit chaining is application-level tamper evidence, not legal immutability. No legal or regulatory accuracy certification is claimed.
+This is a functional demonstration and engineering foundation, not a fully certified enterprise product. Automated official-source crawling, OCR, calibrated ML classifiers, trained anomaly models, cross-encoder reranking, FAISS retrieval, durable background queues, original-document object storage, multi-user notification targeting, refresh-token rotation/revocation and scheduled reports remain future work. Source URLs are metadata and external links; the server does not fetch arbitrary URLs. Settings do not silently activate monitoring or alternate providers. Workflows execute in the request and are suitable for bounded demo documents. Audit chaining is application-level tamper evidence, not legal immutability. No legal or regulatory accuracy certification is claimed.

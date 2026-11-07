@@ -5,7 +5,7 @@ from sqlalchemy import select
 from langgraph.graph import StateGraph, START, END
 from .models import Document, Chunk, Requirement, Finding, Workflow, Notification, now
 from .rag import search, citation, words
-from .risk import assess
+from .risk import assess, configured_weights
 from .audit import log
 
 AGENTS=[('ingestion','Regulatory Ingestion','Validate document identity and indexed content'),('changes','Change Detection','Compare previous document versions'),('requirements','Requirement Extraction','Extract obligations with exact evidence'),('retrieval','Evidence Retrieval','Hybrid search across internal policies'),('gaps','Compliance Gap Analysis','Compare obligations with policy evidence'),('risk','Risk Assessment','Explainable weighted risk factors'),('recommendations','Recommendation','Draft evidence-linked corrective actions'),('validation','Validation & Reflection','Check citations and retry weak retrieval once'),('escalation','Human Escalation','Pause findings for authorized human decisions'),('audit','Audit & Reporting','Record an integrity-linked investigation trail')]
@@ -67,7 +67,7 @@ def build_graph(db, user, run):
         for f in s['findings']:
             req=db.get(Requirement,f['requirement_id']); critical=bool(re.search('suspicious|encrypt|incident|prohibit',req.description,re.I))
             factors={'severity':5 if critical else 3,'likelihood':4 if f['coverage']<.25 else 2,'regulatory_impact':5 if critical else 3,'operational_impact':4 if critical else 2}
-            score,level=assess(factors); results.append({**f,'factors':factors,'score':score,'level':level})
+            score,level=assess(factors,configured_weights(db,user.institution_id)); results.append({**f,'factors':factors,'score':score,'level':level})
         return {'findings':results}
     def recommendations(s):
         return {'findings':[{**f,'recommendation':'Human verification required. Review the cited obligation, validate existing controls, document the control owner and evidence, and propose a dated policy update where a gap is confirmed.'} for f in s['findings']]}
